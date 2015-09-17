@@ -27,6 +27,10 @@
           global))
       (merge global local))))
 
+(defmacro with-lein-dir [dir & forms]
+  `(binding [core.eval/*dir* ~dir]
+     ~@forms))
+
 (defn execute-cmd
   [cmd f]
   (let [result (apply shell/sh (string/split cmd #"\s+"))]
@@ -35,8 +39,8 @@
       (warn-and-exit (:exit result) (:err result)))))
 
 (defn execute-streamed-cmd
-  [cmd]
-  (let [result (apply core.eval/sh (string/split cmd #"\s+"))]
+  [cmd dir]
+  (let [result (with-lein-dir dir (apply core.eval/sh (string/split cmd #"\s+")))]
     (when (not= result 0)
       (main/exit 1 "An error occurred."))))
 
@@ -61,20 +65,20 @@
 (defn copy-sources [dir args]
   (if-let [sources (:sources args)]
     (doseq [source sources] (if (fs/directory? source)
-                              (fs/copy-dir source dir)
+                              (fs/copy-dir source (str dir "/" source))
                               (fs/copy source (str dir "/" source))))
     (warn-and-exit "No sources given.")))
 
-(defn hook [args k]
+(defn hook [dir args k]
   (when-let [cmd (get args k)]
-    (execute-streamed-cmd cmd)))
+    (execute-streamed-cmd cmd dir)))
 
-(defn compile-source [args]
-  (hook args :before-compile)
+(defn compile-source [dir args]
+  (hook dir args :before-compile)
   (if-let [cmd (:compile-cmd args)]
-    (execute-streamed-cmd cmd)
+    (execute-streamed-cmd cmd dir)
     (warn-and-exit "No compile-cmd given."))
-  (hook args :after-compile))
+  (hook dir args :after-compile))
 
 (defn cljsvendor
   ""
@@ -95,7 +99,6 @@
      (mkdir dir)
      (mkdir linked-dir)
      (copy-sources dir args)
-     (fs/with-cwd (str fs/*cwd* "/" dir)
-                  (compile-source args))
+     (compile-source (str fs/*cwd* "/" dir) args)
      (fs/delete linked-dir)
      (fs/sym-link linked-dir dir))))
